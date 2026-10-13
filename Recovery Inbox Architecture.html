@@ -1,0 +1,161 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!DOCTYPE html>
+<title>Recovery Inbox Architecture</title>
+<style>
+  :root{
+    --bg:#F6F7FA; --panel:#FFFFFF; --ink:#141A2E; --sub:#5B6478; --line:#D7DCE6;
+    --rz:#2E7BDB; --async:#C7761F; --actor:#7A4FC2;
+    --font-display:'Fraunces',serif; --font-body:'Inter',system-ui,sans-serif; --font-mono:'JetBrains Mono',monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0E1117; --panel:#161B24; --ink:#EDF0F6; --sub:#97A1B5; --line:#2B3140;
+      --rz:#6FA8E8; --async:#E3A45C; --actor:#B497E8;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0E1117; --panel:#161B24; --ink:#EDF0F6; --sub:#97A1B5; --line:#2B3140;
+    --rz:#6FA8E8; --async:#E3A45C; --actor:#B497E8;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--font-body); padding:32px 16px; padding-block:32px;
+  }
+  .wrap{max-width:860px; margin:0 auto;}
+  h1{
+    font-family:var(--font-display); font-weight:600; font-size:clamp(20px,3.2vw,26px);
+    margin:0 0 20px; letter-spacing:-0.01em;
+  }
+  svg{display:block; width:100%; height:auto;}
+
+  .box-rect{fill:var(--panel); stroke:var(--line); stroke-width:1.4;}
+  .box-tag{font-family:var(--font-mono); font-size:9.5px; font-weight:600; letter-spacing:0.04em; fill:var(--sub);}
+  .box-title{font-family:var(--font-body); font-size:13.5px; font-weight:650; fill:var(--ink);}
+  .edge{fill:none; stroke:var(--ink); stroke-width:1.6; opacity:0.55;}
+  .edge-async{fill:none; stroke:var(--async); stroke-width:1.6; stroke-dasharray:5 5; opacity:0.85;}
+  .edge-label-bg{fill:var(--bg); stroke:none;}
+  .edge-label{font-family:var(--font-mono); font-size:10px; fill:var(--sub); text-anchor:middle; dominant-baseline:middle;}
+  .edge-label-async{font-family:var(--font-mono); font-size:10px; fill:var(--async); text-anchor:middle; dominant-baseline:middle; font-weight:600;}
+  .diamond{fill:var(--panel); stroke:var(--line); stroke-width:1.4;}
+  .diamond-text{font-family:var(--font-body); font-size:12.5px; font-weight:650; fill:var(--ink); text-anchor:middle;}
+  .boundary{fill:none; stroke:var(--actor); stroke-width:1.3; stroke-dasharray:4 4; opacity:0.75;}
+  .boundary-label{font-family:var(--font-mono); font-size:9.5px; font-weight:600; letter-spacing:0.04em; fill:var(--actor); text-anchor:start;}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Inter:wght@400;500;650;700&family=JetBrains+Mono:wght@500;600&display=swap">
+
+<div class="wrap">
+  <h1>Recovery Inbox — system flow</h1>
+
+  <svg viewBox="0 0 960 1060" role="img" aria-label="Flowchart: a declined subscription charge is classified as auto-retryable or not. Auto-retryable declines loop back through a scheduled retry with no inbox entry. Everything else enters the ranked Recovery Inbox, triggers a WhatsApp nudge, waits on the customer outside Razorpay's platform, is picked up by a webhook event, triggers a push alert, and ends in a charge capture logged to the owner's overview.">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--ink)" opacity="0.65"/>
+      </marker>
+      <marker id="arrow-async" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="var(--async)"/>
+      </marker>
+    </defs>
+
+    <!-- boundary around the customer step -->
+    <rect class="boundary" x="180" y="500" width="300" height="84" rx="10"/>
+    <text class="boundary-label" x="188" y="493">OUTSIDE RAZORPAY'S PLATFORM</text>
+
+    <!-- B1: subscription charge attempt -->
+    <rect class="box-rect" x="200" y="30" width="260" height="56" rx="10"/>
+    <text class="box-tag" x="216" y="50">RAZORPAY · PAYMENTS API</text>
+    <text class="box-title" x="216" y="70">Subscription charge attempt</text>
+
+    <!-- D1: decision -->
+    <polygon class="diamond" points="330,130 430,180 330,230 230,180"/>
+    <text class="diamond-text" x="330" y="174">Auto-retryable</text>
+    <text class="diamond-text" x="330" y="190">decline?</text>
+
+    <!-- B_retry: scheduled retry -->
+    <rect class="box-rect" x="620" y="148" width="260" height="56" rx="10" style="stroke:var(--async)"/>
+    <text class="box-tag" x="636" y="168" style="fill:var(--async)">RAZORPAY · RETRY SCHEDULER</text>
+    <text class="box-title" x="636" y="188">Scheduled auto-retry</text>
+
+    <!-- B2: Recovery Inbox -->
+    <rect class="box-rect" x="200" y="270" width="260" height="56" rx="10" style="stroke:var(--rz)"/>
+    <text class="box-tag" x="216" y="290" style="fill:var(--rz)">MERCHANT APP · RECOVERY INBOX</text>
+    <text class="box-title" x="216" y="310">Case enters ranked queue</text>
+
+    <!-- B3: WhatsApp -->
+    <rect class="box-rect" x="200" y="382" width="260" height="56" rx="10"/>
+    <text class="box-tag" x="216" y="402">WHATSAPP BUSINESS API</text>
+    <text class="box-title" x="216" y="422">Merchant sends nudge</text>
+
+    <!-- B4: Customer (external actor) -->
+    <rect class="box-rect" x="200" y="516" width="260" height="56" rx="10" style="stroke:var(--actor); stroke-dasharray:5 4"/>
+    <text class="box-tag" x="216" y="536" style="fill:var(--actor)">CUSTOMER</text>
+    <text class="box-title" x="216" y="556">Updates payment method</text>
+
+    <!-- B5: webhook listener -->
+    <rect class="box-rect" x="200" y="628" width="260" height="56" rx="10"/>
+    <text class="box-tag" x="216" y="648">RAZORPAY · WEBHOOKS</text>
+    <text class="box-title" x="216" y="668">Listener detects the fix</text>
+
+    <!-- B6: push notification -->
+    <rect class="box-rect" x="200" y="740" width="260" height="56" rx="10"/>
+    <text class="box-tag" x="216" y="760">RAZORPAY · PUSH SERVICE</text>
+    <text class="box-title" x="216" y="780">Merchant is alerted</text>
+
+    <!-- B7: charge capture -->
+    <rect class="box-rect" x="200" y="852" width="260" height="56" rx="10" style="stroke:var(--rz)"/>
+    <text class="box-tag" x="216" y="872" style="fill:var(--rz)">RAZORPAY · PAYMENTS API</text>
+    <text class="box-title" x="216" y="892">Merchant taps "Charge"</text>
+
+    <!-- B8: owner overview -->
+    <rect class="box-rect" x="200" y="964" width="260" height="56" rx="10"/>
+    <text class="box-tag" x="216" y="984">MERCHANT APP · OVERVIEW</text>
+    <text class="box-title" x="216" y="1004">Logged as recovered</text>
+
+    <!-- edges: main column -->
+    <line class="edge" x1="330" y1="86" x2="330" y2="128" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="278" y="98" width="104" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="107">charge.failed</text>
+
+    <line class="edge" x1="330" y1="232" x2="330" y2="268" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="310" y="241" width="40" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="250">no</text>
+
+    <line class="edge" x1="330" y1="328" x2="330" y2="380" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="282" y="345" width="96" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="354">ranked queue</text>
+
+    <line class="edge" x1="330" y1="440" x2="330" y2="514" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="275" y="468" width="110" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="477">WhatsApp nudge</text>
+
+    <line class="edge" x1="330" y1="574" x2="330" y2="626" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="275" y="591" width="110" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="600">method updated</text>
+
+    <line class="edge" x1="330" y1="686" x2="330" y2="738" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="278" y="703" width="104" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="712">webhook event</text>
+
+    <line class="edge" x1="330" y1="798" x2="330" y2="850" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="288" y="815" width="84" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="824">push alert</text>
+
+    <line class="edge" x1="330" y1="910" x2="330" y2="962" marker-end="url(#arrow)"/>
+    <rect class="edge-label-bg" x="272" y="927" width="116" height="18" rx="4"/>
+    <text class="edge-label" x="330" y="936">charge captured</text>
+
+    <!-- decision branch: yes -->
+    <line class="edge-async" x1="430" y1="180" x2="618" y2="180" marker-end="url(#arrow-async)"/>
+    <rect class="edge-label-bg" x="504" y="169" width="40" height="18" rx="4"/>
+    <text class="edge-label-async" x="524" y="178">yes</text>
+
+    <!-- loop back from retry into the top of B1 -->
+    <path class="edge-async" d="M 750,146 C 750,8 560,8 394,28" marker-end="url(#arrow-async)"/>
+    <rect class="edge-label-bg" x="508" y="4" width="120" height="18" rx="4"/>
+    <text class="edge-label-async" x="568" y="13">scheduled retry</text>
+  </svg>
+</div>
+
+</body></html>
